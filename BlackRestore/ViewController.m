@@ -1,20 +1,31 @@
 #import "ViewController.h"
+#import <ExternalAccessory/ExternalAccessory.h>
 
 @interface ViewController ()
 
-@property (nonatomic, strong) UIScrollView *scrollView;
-@property (nonatomic, strong) UIStackView *contentStack;
+@property (nonatomic, strong) UIView *sidebar;
+@property (nonatomic, strong) UIView *toolbar;
+@property (nonatomic, strong) UIView *contentView;
+
+@property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *connectionLabel;
-@property (nonatomic, strong) UILabel *accessoryCountLabel;
-@property (nonatomic, strong) UILabel *diagnosticLabel;
-@property (nonatomic, strong) UITextView *logView;
-@property (nonatomic, strong) UILabel *deviceListLabel;
+@property (nonatomic, strong) UILabel *deviceNameLabel;
+@property (nonatomic, strong) UILabel *deviceDetailsLabel;
+@property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UILabel *lastScanLabel;
 
-@property (nonatomic, strong) NSMutableArray<NSString *> *logEntries;
-@property (nonatomic, strong) EAAccessoryManager *accessoryManager;
-@property (nonatomic, strong) NSDateFormatter *timeFormatter;
+@property (nonatomic, strong) UIView *deviceIconView;
+@property (nonatomic, strong) UIImageView *deviceIcon;
+@property (nonatomic, strong) UIView *statusIndicator;
 
-@property (nonatomic) BOOL scanInProgress;
+@property (nonatomic, strong) UIButton *scanButton;
+@property (nonatomic, strong) UIButton *restoreButton;
+@property (nonatomic, strong) UIButton *recoveryButton;
+
+@property (nonatomic, strong) UIStackView *accessoryList;
+@property (nonatomic, strong) NSMutableArray<EAAccessory *> *detectedAccessories;
+
+@property (nonatomic, strong) NSLayoutConstraint *sidebarWidthConstraint;
 
 @end
 
@@ -25,21 +36,21 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.view.backgroundColor = [self colorWithHex:0x080B14];
-    self.logEntries = [NSMutableArray array];
+    self.detectedAccessories = [NSMutableArray array];
 
-    self.accessoryManager = [EAAccessoryManager sharedAccessoryManager];
-
-    self.timeFormatter = [[NSDateFormatter alloc] init];
-    self.timeFormatter.dateFormat = @"HH:mm:ss";
+    self.view.backgroundColor = [UIColor colorWithRed:0.94
+                                                green:0.95
+                                                 blue:0.97
+                                                alpha:1.0];
 
     [self buildInterface];
     [self registerAccessoryNotifications];
+    [self scanForAccessories];
+}
 
-    [self appendLog:@"BlackRestore Device Detection initialized."];
-    [self appendLog:@"Detection engine: ExternalAccessory framework."];
-    [self appendLog:@"Target-device USB detection is not yet available."];
-    [self refreshAccessoryStatus];
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self scanForAccessories];
 }
 
 - (void)dealloc {
@@ -49,478 +60,704 @@
 #pragma mark - Interface
 
 - (void)buildInterface {
-    self.scrollView = [[UIScrollView alloc] init];
-    self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.scrollView.alwaysBounceVertical = YES;
+    self.sidebar = [[UIView alloc] init];
+    self.sidebar.translatesAutoresizingMaskIntoConstraints = NO;
+    self.sidebar.backgroundColor =
+        [UIColor colorWithRed:0.91 green:0.92 blue:0.94 alpha:1.0];
 
-    [self.view addSubview:self.scrollView];
+    [self.view addSubview:self.sidebar];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [self.scrollView.topAnchor
-            constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [self.scrollView.bottomAnchor
-            constraintEqualToAnchor:self.view.bottomAnchor],
-        [self.scrollView.leadingAnchor
-            constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.scrollView.trailingAnchor
-            constraintEqualToAnchor:self.view.trailingAnchor]
-    ]];
+    self.toolbar = [[UIView alloc] init];
+    self.toolbar.translatesAutoresizingMaskIntoConstraints = NO;
+    self.toolbar.backgroundColor = UIColor.whiteColor;
+    [self.view addSubview:self.toolbar];
 
-    self.contentStack = [[UIStackView alloc] init];
-    self.contentStack.axis = UILayoutConstraintAxisVertical;
-    self.contentStack.spacing = 16;
-    self.contentStack.translatesAutoresizingMaskIntoConstraints = NO;
+    self.contentView = [[UIView alloc] init];
+    self.contentView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.contentView.backgroundColor =
+        [UIColor colorWithRed:0.97 green:0.97 blue:0.98 alpha:1.0];
+    [self.view addSubview:self.contentView];
 
-    [self.scrollView addSubview:self.contentStack];
+    self.sidebarWidthConstraint =
+        [self.sidebar.widthAnchor constraintEqualToConstant:142.0];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.contentStack.topAnchor
-            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor
-            constant:22],
-        [self.contentStack.bottomAnchor
-            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.bottomAnchor
-            constant:-28],
-        [self.contentStack.leadingAnchor
-            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor
-            constant:20],
-        [self.contentStack.trailingAnchor
-            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor
-            constant:-20],
-        [self.contentStack.widthAnchor
-            constraintEqualToAnchor:self.scrollView.frameLayoutGuide.widthAnchor
-            constant:-40]
+        [self.sidebar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.sidebar.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.sidebar.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        self.sidebarWidthConstraint,
+
+        [self.toolbar.leadingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor],
+        [self.toolbar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.toolbar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [self.toolbar.heightAnchor constraintEqualToConstant:58.0],
+
+        [self.contentView.leadingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor],
+        [self.contentView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.contentView.topAnchor constraintEqualToAnchor:self.toolbar.bottomAnchor],
+        [self.contentView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
 
-    [self buildHeader];
-    [self buildConnectionCard];
-    [self buildDeviceListCard];
-    [self buildDiagnosticsCard];
-    [self buildLogCard];
-}
-
-- (void)buildHeader {
-    [self.contentStack addArrangedSubview:
-        [self labelWithText:@"BLACKRESTORE"
-                       size:12
-                      color:[self colorWithHex:0x9A8CFF]
-                     weight:UIFontWeightBold]];
-
-    [self.contentStack addArrangedSubview:
-        [self labelWithText:@"Device Detection"
-                       size:32
-                      color:UIColor.whiteColor
-                     weight:UIFontWeightBold]];
-
-    [self.contentStack addArrangedSubview:
-        [self labelWithText:@"USB feasibility research"
-                       size:15
-                      color:[self colorWithHex:0x9AA4B8]
-                     weight:UIFontWeightRegular]];
-
-    UIView *divider = [[UIView alloc] init];
-    divider.backgroundColor = [self colorWithHex:0x252D40];
-    divider.translatesAutoresizingMaskIntoConstraints = NO;
-    [divider.heightAnchor constraintEqualToConstant:1].active = YES;
-
-    [self.contentStack addArrangedSubview:divider];
-}
-
-- (void)buildConnectionCard {
-    UIView *card = [self cardView];
-
-    UIStackView *stack = [[UIStackView alloc] init];
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 12;
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [card addSubview:stack];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:18],
-        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-18],
-        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18]
-    ]];
-
-    [stack addArrangedSubview:
-        [self labelWithText:@"CONNECTION STATUS"
-                       size:11
-                      color:[self colorWithHex:0x9AA4B8]
-                     weight:UIFontWeightBold]];
-
-    self.connectionLabel =
-        [self labelWithText:@"Waiting for scan"
-                       size:18
-                      color:UIColor.whiteColor
-                     weight:UIFontWeightSemibold];
-
-    self.accessoryCountLabel =
-        [self labelWithText:@"No scan performed"
-                       size:13
-                      color:[self colorWithHex:0x9AA4B8]
-                     weight:UIFontWeightRegular];
-
-    [stack addArrangedSubview:self.connectionLabel];
-    [stack addArrangedSubview:self.accessoryCountLabel];
-
-    UIButton *scanButton =
-        [self buttonWithTitle:@"Scan Connected Accessories"
-                       action:@selector(scanButtonTapped)];
-
-    [stack addArrangedSubview:scanButton];
-
-    [self.contentStack addArrangedSubview:card];
-}
-
-- (void)buildDeviceListCard {
-    UIView *card = [self cardView];
-
-    UIStackView *stack = [[UIStackView alloc] init];
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 12;
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [card addSubview:stack];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:18],
-        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-18],
-        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18]
-    ]];
-
-    [stack addArrangedSubview:
-        [self labelWithText:@"DETECTED ACCESSORIES"
-                       size:11
-                      color:[self colorWithHex:0x9AA4B8]
-                     weight:UIFontWeightBold]];
-
-    self.deviceListLabel =
-        [self labelWithText:@"Run a scan to inspect supported accessories."
-                       size:13
-                      color:[self colorWithHex:0xD0D7E5]
-                     weight:UIFontWeightRegular];
-
-    self.deviceListLabel.numberOfLines = 0;
-    self.deviceListLabel.lineBreakMode = NSLineBreakByWordWrapping;
-
-    [stack addArrangedSubview:self.deviceListLabel];
-
-    [self.contentStack addArrangedSubview:card];
-}
-
-- (void)buildDiagnosticsCard {
-    UIView *card = [self cardView];
-
-    UIStackView *stack = [[UIStackView alloc] init];
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 10;
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [card addSubview:stack];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:18],
-        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-18],
-        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18]
-    ]];
-
-    [stack addArrangedSubview:
-        [self labelWithText:@"CAPABILITY STATUS"
-                       size:11
-                      color:[self colorWithHex:0x9AA4B8]
-                     weight:UIFontWeightBold]];
-
-    self.diagnosticLabel =
-        [self labelWithText:
-            @"Accessory API: Available\n"
-             "Supported accessory enumeration: Available\n"
-             "Arbitrary iPhone detection: Unverified\n"
-             "Recovery Mode detection: Not implemented\n"
-             "DFU detection: Not implemented\n"
-             "Firmware restoration: Not implemented"
-                       size:13
-                      color:[self colorWithHex:0xD0D7E5]
-                     weight:UIFontWeightRegular];
-
-    self.diagnosticLabel.numberOfLines = 0;
-
-    [stack addArrangedSubview:self.diagnosticLabel];
-
-    [self.contentStack addArrangedSubview:card];
-}
-
-- (void)buildLogCard {
-    UIView *card = [self cardView];
-
-    UIStackView *stack = [[UIStackView alloc] init];
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 10;
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [card addSubview:stack];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:18],
-        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-18],
-        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:18],
-        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-18]
-    ]];
-
-    [stack addArrangedSubview:
-        [self labelWithText:@"DETECTION LOG"
-                       size:11
-                      color:[self colorWithHex:0x9AA4B8]
-                     weight:UIFontWeightBold]];
-
-    self.logView = [[UITextView alloc] init];
-    self.logView.backgroundColor = [self colorWithHex:0x080B14];
-    self.logView.textColor = [self colorWithHex:0xAFC6C0];
-    self.logView.font =
-        [UIFont monospacedSystemFontOfSize:12
-                                    weight:UIFontWeightRegular];
-
-    self.logView.editable = NO;
-    self.logView.selectable = YES;
-    self.logView.scrollEnabled = NO;
-    self.logView.textContainerInset = UIEdgeInsetsMake(10, 8, 10, 8);
-    self.logView.layer.cornerRadius = 10;
-    self.logView.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [self.logView.heightAnchor
-        constraintGreaterThanOrEqualToConstant:130].active = YES;
-
-    [stack addArrangedSubview:self.logView];
-
-    [stack addArrangedSubview:
-        [self buttonWithTitle:@"Clear Log"
-                       action:@selector(clearLogTapped)]];
-
-    [self.contentStack addArrangedSubview:card];
-}
-
-#pragma mark - Accessory Notifications
-
-- (void)registerAccessoryNotifications {
-    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-
-    [center addObserver:self
-               selector:@selector(accessoryDidConnect:)
-                   name:EAAccessoryDidConnectNotification
-                 object:nil];
-
-    [center addObserver:self
-               selector:@selector(accessoryDidDisconnect:)
-                   name:EAAccessoryDidDisconnectNotification
-                 object:nil];
-
-    [self.accessoryManager registerForLocalNotifications];
-
-    [self appendLog:@"Registered External Accessory notifications."];
-}
-
-- (void)accessoryDidConnect:(NSNotification *)notification {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self appendLog:@"Supported accessory connection event received."];
-        [self refreshAccessoryStatus];
-    });
-}
-
-- (void)accessoryDidDisconnect:(NSNotification *)notification {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self appendLog:@"Supported accessory disconnection event received."];
-        [self refreshAccessoryStatus];
-    });
-}
-
-#pragma mark - Detection
-
-- (void)scanButtonTapped {
-    if (self.scanInProgress) {
-        return;
-    }
-
-    self.scanInProgress = YES;
-    self.connectionLabel.text = @"Scanning supported accessories...";
-    self.accessoryCountLabel.text = @"Checking the iOS accessory registry";
-
-    [self appendLog:@"--------------------------------"];
-    [self appendLog:@"Starting accessory scan."];
-
-    [self refreshAccessoryStatus];
-
-    self.scanInProgress = NO;
-}
-
-- (void)refreshAccessoryStatus {
-    NSArray<EAAccessory *> *accessories =
-        self.accessoryManager.connectedAccessories;
-
-    NSMutableArray<NSString *> *descriptions = [NSMutableArray array];
-
-    for (NSUInteger index = 0; index < accessories.count; index++) {
-        EAAccessory *accessory = accessories[index];
-
-        NSString *name = [self safeString:accessory.name];
-        NSString *manufacturer = [self safeString:accessory.manufacturer];
-        NSString *model = [self safeString:accessory.modelNumber];
-        NSString *firmware = [self safeString:accessory.firmwareRevision];
-        NSString *hardware = [self safeString:accessory.hardwareRevision];
-
-        NSMutableString *details = [NSMutableString string];
-
-        [details appendFormat:@"Accessory %lu\n", (unsigned long)(index + 1)];
-        [details appendFormat:@"Name: %@\n", name];
-        [details appendFormat:@"Manufacturer: %@\n", manufacturer];
-        [details appendFormat:@"Model: %@\n", model];
-        [details appendFormat:@"Firmware: %@\n", firmware];
-        [details appendFormat:@"Hardware: %@\n", hardware];
-        [details appendFormat:@"Connected: %@\n",
-            accessory.isConnected ? @"Yes" : @"No"];
-
-        NSArray<NSString *> *protocols = accessory.protocolStrings;
-
-        if (protocols.count > 0) {
-            [details appendFormat:@"Protocols: %@\n",
-                [protocols componentsJoinedByString:@", "]];
-        } else {
-            [details appendString:@"Protocols: None reported\n"];
-        }
-
-        [descriptions addObject:details];
-
-        [self appendLog:
-            [NSString stringWithFormat:
-                @"Accessory found: %@ (%@)",
-                name, model]];
-    }
-
-    if (accessories.count == 0) {
-        self.connectionLabel.text = @"No supported accessories detected";
-        self.accessoryCountLabel.text =
-            @"0 accessories reported by ExternalAccessory";
-
-        self.deviceListLabel.text =
-            @"No supported external accessories were reported by iOS.\n\n"
-             "This does not prove that no cable is connected. An attached "
-             "iPhone, iPad, or iPod touch may not be exposed through this API.";
-
-        [self appendLog:@"Scan result: zero supported accessories."];
-    } else {
-        self.connectionLabel.text = @"Supported accessories detected";
-
-        self.accessoryCountLabel.text =
-            [NSString stringWithFormat:
-                @"%lu accessory/accessories",
-                (unsigned long)accessories.count];
-
-        self.deviceListLabel.text =
-            [descriptions componentsJoinedByString:@"\n--------------------\n"];
-
-        [self appendLog:
-            [NSString stringWithFormat:
-                @"Scan result: %lu accessory/accessories.",
-                (unsigned long)accessories.count]];
-    }
-
-    [self appendLog:
-        @"Target iPhone identity has not been verified by this scan."];
-}
-
-#pragma mark - Actions
-
-- (void)clearLogTapped {
-    [self.logEntries removeAllObjects];
-    self.logView.text = @"";
-    [self appendLog:@"Log cleared."];
-}
-
-#pragma mark - Helpers
-
-- (NSString *)safeString:(NSString *)value {
-    if (value.length == 0) {
-        return @"Not reported";
-    }
-
-    return value;
-}
-
-- (UIView *)cardView {
-    UIView *view = [[UIView alloc] init];
-
-    view.backgroundColor = [self colorWithHex:0x111725];
-    view.layer.cornerRadius = 16;
-    view.layer.borderWidth = 1;
-    view.layer.borderColor = [self colorWithHex:0x252D40].CGColor;
-    view.translatesAutoresizingMaskIntoConstraints = NO;
-
-    return view;
+    [self buildSidebar];
+    [self buildToolbar];
+    [self buildMainContent];
 }
 
 - (UILabel *)labelWithText:(NSString *)text
                       size:(CGFloat)size
                      color:(UIColor *)color
                     weight:(UIFontWeight)weight {
-
     UILabel *label = [[UILabel alloc] init];
-
+    label.translatesAutoresizingMaskIntoConstraints = NO;
     label.text = text;
-    label.textColor = color;
     label.font = [UIFont systemFontOfSize:size weight:weight];
+    label.textColor = color;
     label.numberOfLines = 0;
-
     return label;
 }
 
-- (UIButton *)buttonWithTitle:(NSString *)title action:(SEL)action {
+- (UIView *)makeCard {
+    UIView *card = [[UIView alloc] init];
+    card.translatesAutoresizingMaskIntoConstraints = NO;
+    card.backgroundColor = UIColor.whiteColor;
+    card.layer.cornerRadius = 12.0;
+    card.layer.borderWidth = 1.0;
+    card.layer.borderColor =
+        [UIColor colorWithWhite:0.86 alpha:1.0].CGColor;
+    return card;
+}
+
+#pragma mark - Sidebar
+
+- (void)buildSidebar {
+    UILabel *appLabel =
+        [self labelWithText:@"BlackRestore"
+                       size:17
+                      color:[UIColor colorWithRed:0.16 green:0.17 blue:0.20 alpha:1]
+                     weight:UIFontWeightBold];
+
+    [self.sidebar addSubview:appLabel];
+
+    UILabel *sectionLabel =
+        [self labelWithText:@"LOCATIONS"
+                       size:10
+                      color:[UIColor secondaryLabelColor]
+                     weight:UIFontWeightBold];
+
+    [self.sidebar addSubview:sectionLabel];
+
+    UIButton *devicesButton =
+        [self sidebarButtonWithTitle:@"Devices"
+                                icon:@"iphone"
+                            selected:YES];
+
+    [self.sidebar addSubview:devicesButton];
+
+    UIButton *recoveryButton =
+        [self sidebarButtonWithTitle:@"Recovery"
+                                icon:@"arrow.clockwise"
+                            selected:NO];
+
+    [self.sidebar addSubview:recoveryButton];
+
+    UIButton *activityButton =
+        [self sidebarButtonWithTitle:@"Activity"
+                                icon:@"clock"
+                            selected:NO];
+
+    [self.sidebar addSubview:activityButton];
+
+    UILabel *footer =
+        [self labelWithText:@"DEVICE UTILITY"
+                       size:9
+                      color:[UIColor secondaryLabelColor]
+                     weight:UIFontWeightSemibold];
+
+    [self.sidebar addSubview:footer];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [appLabel.topAnchor constraintEqualToAnchor:self.sidebar.safeAreaLayoutGuide.topAnchor constant:18],
+        [appLabel.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:13],
+        [appLabel.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-6],
+
+        [sectionLabel.topAnchor constraintEqualToAnchor:appLabel.bottomAnchor constant:35],
+        [sectionLabel.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:13],
+
+        [devicesButton.topAnchor constraintEqualToAnchor:sectionLabel.bottomAnchor constant:12],
+        [devicesButton.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:7],
+        [devicesButton.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-7],
+        [devicesButton.heightAnchor constraintEqualToConstant:36],
+
+        [recoveryButton.topAnchor constraintEqualToAnchor:devicesButton.bottomAnchor constant:5],
+        [recoveryButton.leadingAnchor constraintEqualToAnchor:devicesButton.leadingAnchor],
+        [recoveryButton.trailingAnchor constraintEqualToAnchor:devicesButton.trailingAnchor],
+        [recoveryButton.heightAnchor constraintEqualToConstant:36],
+
+        [activityButton.topAnchor constraintEqualToAnchor:recoveryButton.bottomAnchor constant:5],
+        [activityButton.leadingAnchor constraintEqualToAnchor:devicesButton.leadingAnchor],
+        [activityButton.trailingAnchor constraintEqualToAnchor:devicesButton.trailingAnchor],
+        [activityButton.heightAnchor constraintEqualToConstant:36],
+
+        [footer.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:13],
+        [footer.bottomAnchor constraintEqualToAnchor:self.sidebar.safeAreaLayoutGuide.bottomAnchor constant:-18]
+    ]];
+}
+
+- (UIButton *)sidebarButtonWithTitle:(NSString *)title
+                                icon:(NSString *)icon
+                            selected:(BOOL)selected {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
 
-    button.backgroundColor = [self colorWithHex:0x7566E8];
-    button.layer.cornerRadius = 12;
-    button.tintColor = UIColor.whiteColor;
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:14
+                                                        weight:UIImageSymbolWeightMedium];
 
-    button.titleLabel.font =
-        [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    UIImage *image = [UIImage systemImageNamed:icon
+                         withConfiguration:configuration];
 
-    button.contentEdgeInsets = UIEdgeInsetsMake(13, 16, 13, 16);
+    [button setImage:image forState:UIControlStateNormal];
+    [button setTitle:[@"  " stringByAppendingString:title]
+            forState:UIControlStateNormal];
 
-    [button setTitle:title forState:UIControlStateNormal];
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    button.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    button.layer.cornerRadius = 7.0;
 
-    [button addTarget:self
-               action:action
-     forControlEvents:UIControlEventTouchUpInside];
+    UIColor *textColor = selected
+        ? [UIColor colorWithRed:0.13 green:0.35 blue:0.76 alpha:1]
+        : [UIColor colorWithRed:0.25 green:0.26 blue:0.29 alpha:1];
+
+    [button setTitleColor:textColor forState:UIControlStateNormal];
+    button.tintColor = textColor;
+
+    if (selected) {
+        button.backgroundColor =
+            [UIColor colorWithRed:0.82 green:0.87 blue:0.96 alpha:1.0];
+    }
 
     return button;
 }
 
-- (UIColor *)colorWithHex:(uint32_t)hex {
-    return [UIColor colorWithRed:((hex >> 16) & 0xFF) / 255.0
-                           green:((hex >> 8) & 0xFF) / 255.0
-                            blue:(hex & 0xFF) / 255.0
-                           alpha:1.0];
+#pragma mark - Toolbar
+
+- (void)buildToolbar {
+    self.titleLabel =
+        [self labelWithText:@"Devices"
+                       size:19
+                      color:[UIColor colorWithRed:0.12 green:0.13 blue:0.15 alpha:1]
+                     weight:UIFontWeightSemibold];
+
+    [self.toolbar addSubview:self.titleLabel];
+
+    self.connectionLabel =
+        [self labelWithText:@"Not connected"
+                       size:11
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    [self.toolbar addSubview:self.connectionLabel];
+
+    self.statusIndicator = [[UIView alloc] init];
+    self.statusIndicator.translatesAutoresizingMaskIntoConstraints = NO;
+    self.statusIndicator.backgroundColor = UIColor.systemGrayColor;
+    self.statusIndicator.layer.cornerRadius = 4.0;
+    [self.toolbar addSubview:self.statusIndicator];
+
+    self.scanButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.scanButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.scanButton.backgroundColor =
+        [UIColor colorWithRed:0.14 green:0.39 blue:0.83 alpha:1];
+    self.scanButton.layer.cornerRadius = 7.0;
+    self.scanButton.titleLabel.font =
+        [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    [self.scanButton setTitle:@"Scan" forState:UIControlStateNormal];
+    [self.scanButton setTitleColor:UIColor.whiteColor
+                          forState:UIControlStateNormal];
+    [self.scanButton addTarget:self
+                        action:@selector(scanButtonTapped)
+              forControlEvents:UIControlEventTouchUpInside];
+
+    [self.toolbar addSubview:self.scanButton];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.titleLabel.leadingAnchor constraintEqualToAnchor:self.toolbar.leadingAnchor constant:18],
+        [self.titleLabel.centerYAnchor constraintEqualToAnchor:self.toolbar.centerYAnchor],
+
+        [self.statusIndicator.widthAnchor constraintEqualToConstant:8],
+        [self.statusIndicator.heightAnchor constraintEqualToConstant:8],
+        [self.statusIndicator.leadingAnchor constraintEqualToAnchor:self.titleLabel.trailingAnchor constant:12],
+        [self.statusIndicator.centerYAnchor constraintEqualToAnchor:self.toolbar.centerYAnchor],
+
+        [self.connectionLabel.leadingAnchor constraintEqualToAnchor:self.statusIndicator.trailingAnchor constant:6],
+        [self.connectionLabel.centerYAnchor constraintEqualToAnchor:self.toolbar.centerYAnchor],
+
+        [self.scanButton.trailingAnchor constraintEqualToAnchor:self.toolbar.trailingAnchor constant:-12],
+        [self.scanButton.centerYAnchor constraintEqualToAnchor:self.toolbar.centerYAnchor],
+        [self.scanButton.widthAnchor constraintEqualToConstant:58],
+        [self.scanButton.heightAnchor constraintEqualToConstant:31]
+    ]];
 }
 
-- (void)appendLog:(NSString *)message {
-    if (!self.logEntries) {
-        self.logEntries = [NSMutableArray array];
+#pragma mark - Main Content
+
+- (void)buildMainContent {
+    UIScrollView *scrollView = [[UIScrollView alloc] init];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.alwaysBounceVertical = YES;
+    [self.contentView addSubview:scrollView];
+
+    UIView *page = [[UIView alloc] init];
+    page.translatesAutoresizingMaskIntoConstraints = NO;
+    [scrollView addSubview:page];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [scrollView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
+        [scrollView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+        [scrollView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+        [scrollView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
+
+        [page.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor],
+        [page.leadingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.leadingAnchor],
+        [page.trailingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.trailingAnchor],
+        [page.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor],
+        [page.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor]
+    ]];
+
+    UILabel *heading =
+        [self labelWithText:@"Connected Device"
+                       size:23
+                      color:[UIColor colorWithRed:0.12 green:0.13 blue:0.15 alpha:1]
+                     weight:UIFontWeightBold];
+
+    UILabel *subtitle =
+        [self labelWithText:@"Connect a supported device or accessory to get started."
+                       size:12
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    [page addSubview:heading];
+    [page addSubview:subtitle];
+
+    UIView *deviceCard = [self makeCard];
+    [page addSubview:deviceCard];
+
+    self.deviceIconView = [[UIView alloc] init];
+    self.deviceIconView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.deviceIconView.backgroundColor =
+        [UIColor colorWithRed:0.92 green:0.94 blue:0.97 alpha:1];
+    self.deviceIconView.layer.cornerRadius = 15;
+    [deviceCard addSubview:self.deviceIconView];
+
+    self.deviceIcon = [[UIImageView alloc] initWithImage:
+                       [UIImage systemImageNamed:@"iphone"]];
+    self.deviceIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    self.deviceIcon.contentMode = UIViewContentModeScaleAspectFit;
+    self.deviceIcon.tintColor =
+        [UIColor colorWithRed:0.31 green:0.34 blue:0.40 alpha:1];
+    [self.deviceIconView addSubview:self.deviceIcon];
+
+    self.deviceNameLabel =
+        [self labelWithText:@"No device detected"
+                       size:17
+                      color:[UIColor labelColor]
+                     weight:UIFontWeightSemibold];
+
+    self.deviceDetailsLabel =
+        [self labelWithText:@"Connect a supported accessory, then scan again."
+                       size:12
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    [deviceCard addSubview:self.deviceNameLabel];
+    [deviceCard addSubview:self.deviceDetailsLabel];
+
+    UIView *separator = [[UIView alloc] init];
+    separator.translatesAutoresizingMaskIntoConstraints = NO;
+    separator.backgroundColor = [UIColor colorWithWhite:0.91 alpha:1];
+    [deviceCard addSubview:separator];
+
+    self.lastScanLabel =
+        [self labelWithText:@"Last scan: not yet scanned"
+                       size:11
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    [deviceCard addSubview:self.lastScanLabel];
+
+    UILabel *detailsHeading =
+        [self labelWithText:@"Device Information"
+                       size:16
+                      color:UIColor.labelColor
+                     weight:UIFontWeightSemibold];
+
+    [page addSubview:detailsHeading];
+
+    UIView *detailsCard = [self makeCard];
+    [page addSubview:detailsCard];
+
+    UILabel *connectionKey =
+        [self labelWithText:@"Connection"
+                       size:12
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    self.statusLabel =
+        [self labelWithText:@"No supported accessory reported by iOS"
+                       size:12
+                      color:UIColor.labelColor
+                     weight:UIFontWeightMedium];
+
+    UILabel *protocolKey =
+        [self labelWithText:@"Detection method"
+                       size:12
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    UILabel *protocolValue =
+        [self labelWithText:@"Apple ExternalAccessory API"
+                       size:12
+                      color:UIColor.labelColor
+                     weight:UIFontWeightMedium];
+
+    UILabel *limitationKey =
+        [self labelWithText:@"USB device access"
+                       size:12
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    UILabel *limitationValue =
+        [self labelWithText:@"General iPhone / Recovery / DFU detection is unavailable to this jailed app."
+                       size:12
+                      color:UIColor.labelColor
+                     weight:UIFontWeightMedium];
+
+    [detailsCard addSubview:connectionKey];
+    [detailsCard addSubview:self.statusLabel];
+    [detailsCard addSubview:protocolKey];
+    [detailsCard addSubview:protocolValue];
+    [detailsCard addSubview:limitationKey];
+    [detailsCard addSubview:limitationValue];
+
+    UILabel *actionsHeading =
+        [self labelWithText:@"Recovery & Restore"
+                       size:16
+                      color:UIColor.labelColor
+                     weight:UIFontWeightSemibold];
+
+    [page addSubview:actionsHeading];
+
+    UIView *actionsCard = [self makeCard];
+    [page addSubview:actionsCard];
+
+    UILabel *actionsDescription =
+        [self labelWithText:@"These controls are placeholders until a supported restoration mechanism is implemented."
+                       size:12
+                      color:UIColor.secondaryLabelColor
+                     weight:UIFontWeightRegular];
+
+    [actionsCard addSubview:actionsDescription];
+
+    self.recoveryButton = [self actionButtonWithTitle:@"Enter Recovery"
+                                                 icon:@"arrow.clockwise"];
+
+    self.restoreButton = [self actionButtonWithTitle:@"Restore Device"
+                                                icon:@"arrow.down.to.line"];
+
+    self.recoveryButton.enabled = NO;
+    self.restoreButton.enabled = NO;
+
+    [actionsCard addSubview:self.recoveryButton];
+    [actionsCard addSubview:self.restoreButton];
+
+    self.accessoryList = [[UIStackView alloc] init];
+    self.accessoryList.translatesAutoresizingMaskIntoConstraints = NO;
+    self.accessoryList.axis = UILayoutConstraintAxisVertical;
+    self.accessoryList.spacing = 7;
+    [page addSubview:self.accessoryList];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [heading.topAnchor constraintEqualToAnchor:page.topAnchor constant:22],
+        [heading.leadingAnchor constraintEqualToAnchor:page.leadingAnchor constant:18],
+        [heading.trailingAnchor constraintEqualToAnchor:page.trailingAnchor constant:-14],
+
+        [subtitle.topAnchor constraintEqualToAnchor:heading.bottomAnchor constant:5],
+        [subtitle.leadingAnchor constraintEqualToAnchor:heading.leadingAnchor],
+        [subtitle.trailingAnchor constraintEqualToAnchor:page.trailingAnchor constant:-14],
+
+        [deviceCard.topAnchor constraintEqualToAnchor:subtitle.bottomAnchor constant:19],
+        [deviceCard.leadingAnchor constraintEqualToAnchor:page.leadingAnchor constant:14],
+        [deviceCard.trailingAnchor constraintEqualToAnchor:page.trailingAnchor constant:-14],
+
+        [self.deviceIconView.topAnchor constraintEqualToAnchor:deviceCard.topAnchor constant:17],
+        [self.deviceIconView.leadingAnchor constraintEqualToAnchor:deviceCard.leadingAnchor constant:15],
+        [self.deviceIconView.widthAnchor constraintEqualToConstant:56],
+        [self.deviceIconView.heightAnchor constraintEqualToConstant:66],
+
+        [self.deviceIcon.centerXAnchor constraintEqualToAnchor:self.deviceIconView.centerXAnchor],
+        [self.deviceIcon.centerYAnchor constraintEqualToAnchor:self.deviceIconView.centerYAnchor],
+        [self.deviceIcon.widthAnchor constraintEqualToConstant:28],
+        [self.deviceIcon.heightAnchor constraintEqualToConstant:37],
+
+        [self.deviceNameLabel.topAnchor constraintEqualToAnchor:self.deviceIconView.topAnchor constant:7],
+        [self.deviceNameLabel.leadingAnchor constraintEqualToAnchor:self.deviceIconView.trailingAnchor constant:13],
+        [self.deviceNameLabel.trailingAnchor constraintEqualToAnchor:deviceCard.trailingAnchor constant:-10],
+
+        [self.deviceDetailsLabel.topAnchor constraintEqualToAnchor:self.deviceNameLabel.bottomAnchor constant:5],
+        [self.deviceDetailsLabel.leadingAnchor constraintEqualToAnchor:self.deviceNameLabel.leadingAnchor],
+        [self.deviceDetailsLabel.trailingAnchor constraintEqualToAnchor:self.deviceNameLabel.trailingAnchor],
+
+        [separator.topAnchor constraintEqualToAnchor:self.deviceIconView.bottomAnchor constant:15],
+        [separator.leadingAnchor constraintEqualToAnchor:deviceCard.leadingAnchor constant:15],
+        [separator.trailingAnchor constraintEqualToAnchor:deviceCard.trailingAnchor constant:-15],
+        [separator.heightAnchor constraintEqualToConstant:1],
+
+        [self.lastScanLabel.topAnchor constraintEqualToAnchor:separator.bottomAnchor constant:11],
+        [self.lastScanLabel.leadingAnchor constraintEqualToAnchor:separator.leadingAnchor],
+        [self.lastScanLabel.trailingAnchor constraintEqualToAnchor:separator.trailingAnchor],
+        [self.lastScanLabel.bottomAnchor constraintEqualToAnchor:deviceCard.bottomAnchor constant:-12],
+
+        [detailsHeading.topAnchor constraintEqualToAnchor:deviceCard.bottomAnchor constant:22],
+        [detailsHeading.leadingAnchor constraintEqualToAnchor:heading.leadingAnchor],
+        [detailsHeading.trailingAnchor constraintEqualToAnchor:heading.trailingAnchor],
+
+        [detailsCard.topAnchor constraintEqualToAnchor:detailsHeading.bottomAnchor constant:10],
+        [detailsCard.leadingAnchor constraintEqualToAnchor:deviceCard.leadingAnchor],
+        [detailsCard.trailingAnchor constraintEqualToAnchor:deviceCard.trailingAnchor],
+
+        [connectionKey.topAnchor constraintEqualToAnchor:detailsCard.topAnchor constant:15],
+        [connectionKey.leadingAnchor constraintEqualToAnchor:detailsCard.leadingAnchor constant:14],
+        [connectionKey.widthAnchor constraintEqualToConstant:105],
+
+        [self.statusLabel.leadingAnchor constraintEqualToAnchor:connectionKey.trailingAnchor constant:5],
+        [self.statusLabel.topAnchor constraintEqualToAnchor:connectionKey.topAnchor],
+        [self.statusLabel.trailingAnchor constraintEqualToAnchor:detailsCard.trailingAnchor constant:-12],
+
+        [protocolKey.topAnchor constraintEqualToAnchor:connectionKey.bottomAnchor constant:14],
+        [protocolKey.leadingAnchor constraintEqualToAnchor:connectionKey.leadingAnchor],
+        [protocolKey.widthAnchor constraintEqualToAnchor:connectionKey.widthAnchor],
+
+        [protocolValue.topAnchor constraintEqualToAnchor:protocolKey.topAnchor],
+        [protocolValue.leadingAnchor constraintEqualToAnchor:protocolKey.trailingAnchor constant:5],
+        [protocolValue.trailingAnchor constraintEqualToAnchor:self.statusLabel.trailingAnchor],
+
+        [limitationKey.topAnchor constraintEqualToAnchor:protocolKey.bottomAnchor constant:14],
+        [limitationKey.leadingAnchor constraintEqualToAnchor:connectionKey.leadingAnchor],
+        [limitationKey.widthAnchor constraintEqualToAnchor:connectionKey.widthAnchor],
+
+        [limitationValue.topAnchor constraintEqualToAnchor:limitationKey.topAnchor],
+        [limitationValue.leadingAnchor constraintEqualToAnchor:limitationKey.trailingAnchor constant:5],
+        [limitationValue.trailingAnchor constraintEqualToAnchor:self.statusLabel.trailingAnchor],
+        [limitationValue.bottomAnchor constraintEqualToAnchor:detailsCard.bottomAnchor constant:-15],
+
+        [actionsHeading.topAnchor constraintEqualToAnchor:detailsCard.bottomAnchor constant:22],
+        [actionsHeading.leadingAnchor constraintEqualToAnchor:heading.leadingAnchor],
+        [actionsHeading.trailingAnchor constraintEqualToAnchor:heading.trailingAnchor],
+
+        [actionsCard.topAnchor constraintEqualToAnchor:actionsHeading.bottomAnchor constant:10],
+        [actionsCard.leadingAnchor constraintEqualToAnchor:deviceCard.leadingAnchor],
+        [actionsCard.trailingAnchor constraintEqualToAnchor:deviceCard.trailingAnchor],
+
+        [actionsDescription.topAnchor constraintEqualToAnchor:actionsCard.topAnchor constant:14],
+        [actionsDescription.leadingAnchor constraintEqualToAnchor:actionsCard.leadingAnchor constant:14],
+        [actionsDescription.trailingAnchor constraintEqualToAnchor:actionsCard.trailingAnchor constant:-14],
+
+        [self.recoveryButton.topAnchor constraintEqualToAnchor:actionsDescription.bottomAnchor constant:13],
+        [self.recoveryButton.leadingAnchor constraintEqualToAnchor:actionsCard.leadingAnchor constant:14],
+        [self.recoveryButton.trailingAnchor constraintEqualToAnchor:actionsCard.trailingAnchor constant:-14],
+        [self.recoveryButton.heightAnchor constraintEqualToConstant:38],
+
+        [self.restoreButton.topAnchor constraintEqualToAnchor:self.recoveryButton.bottomAnchor constant:8],
+        [self.restoreButton.leadingAnchor constraintEqualToAnchor:self.recoveryButton.leadingAnchor],
+        [self.restoreButton.trailingAnchor constraintEqualToAnchor:self.recoveryButton.trailingAnchor],
+        [self.restoreButton.heightAnchor constraintEqualToConstant:38],
+        [self.restoreButton.bottomAnchor constraintEqualToAnchor:actionsCard.bottomAnchor constant:-14],
+
+        [self.accessoryList.topAnchor constraintEqualToAnchor:actionsCard.bottomAnchor constant:12],
+        [self.accessoryList.leadingAnchor constraintEqualToAnchor:deviceCard.leadingAnchor],
+        [self.accessoryList.trailingAnchor constraintEqualToAnchor:deviceCard.trailingAnchor],
+        [self.accessoryList.bottomAnchor constraintEqualToAnchor:page.bottomAnchor constant:-25]
+    ]];
+}
+
+- (UIButton *)actionButtonWithTitle:(NSString *)title icon:(NSString *)icon {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:13
+                                                        weight:UIImageSymbolWeightMedium];
+
+    [button setImage:[UIImage systemImageNamed:icon
+                             withConfiguration:configuration]
+            forState:UIControlStateNormal];
+
+    [button setTitle:[@"  " stringByAppendingString:title]
+            forState:UIControlStateNormal];
+
+    button.titleLabel.font =
+        [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+
+    button.layer.cornerRadius = 7.0;
+    button.layer.borderWidth = 1.0;
+    button.layer.borderColor =
+        [UIColor colorWithWhite:0.83 alpha:1.0].CGColor;
+
+    button.backgroundColor =
+        [UIColor colorWithRed:0.97 green:0.97 blue:0.98 alpha:1.0];
+
+    [button setTitleColor:UIColor.secondaryLabelColor
+                 forState:UIControlStateNormal];
+
+    button.tintColor = UIColor.secondaryLabelColor;
+
+    return button;
+}
+
+#pragma mark - Accessory Detection
+
+- (void)registerAccessoryNotifications {
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+
+    [center addObserver:self
+               selector:@selector(accessoryConnected:)
+                   name:EAAccessoryDidConnectNotification
+                 object:nil];
+
+    [center addObserver:self
+               selector:@selector(accessoryDisconnected:)
+                   name:EAAccessoryDidDisconnectNotification
+                 object:nil];
+
+    [[EAAccessoryManager sharedAccessoryManager]
+        registerForLocalNotifications];
+}
+
+- (void)scanButtonTapped {
+    [self scanForAccessories];
+}
+
+- (void)scanForAccessories {
+    EAAccessoryManager *manager = [EAAccessoryManager sharedAccessoryManager];
+
+    NSArray<EAAccessory *> *accessories = manager.connectedAccessories;
+
+    [self.detectedAccessories removeAllObjects];
+    [self.detectedAccessories addObjectsFromArray:accessories];
+
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateStyle = NSDateFormatterNoStyle;
+    formatter.timeStyle = NSDateFormatterShortStyle;
+
+    self.lastScanLabel.text =
+        [NSString stringWithFormat:@"Last scan: %@",
+         [formatter stringFromDate:[NSDate date]]];
+
+    [self updateDetectionInterface];
+}
+
+- (void)accessoryConnected:(NSNotification *)notification {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self scanForAccessories];
+    });
+}
+
+- (void)accessoryDisconnected:(NSNotification *)notification {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self scanForAccessories];
+    });
+}
+
+- (void)updateDetectionInterface {
+    for (UIView *view in self.accessoryList.arrangedSubviews) {
+        [self.accessoryList removeArrangedSubview:view];
+        [view removeFromSuperview];
     }
 
-    NSString *timestamp =
-        [self.timeFormatter stringFromDate:[NSDate date]] ?: @"--:--:--";
+    if (self.detectedAccessories.count == 0) {
+        self.connectionLabel.text = @"Not connected";
+        self.statusIndicator.backgroundColor = UIColor.systemGrayColor;
 
-    NSString *entry =
-        [NSString stringWithFormat:@"[%@] %@", timestamp, message];
+        self.deviceNameLabel.text = @"No supported accessory detected";
+        self.deviceDetailsLabel.text =
+            @"iOS did not report an accessory through ExternalAccessory.";
 
-    [self.logEntries addObject:entry];
+        self.statusLabel.text = @"No supported accessory reported";
+        self.deviceIcon.image = [UIImage systemImageNamed:@"iphone"];
+        self.deviceIcon.tintColor = UIColor.secondaryLabelColor;
 
-    if (self.logEntries.count > 150) {
-        [self.logEntries removeObjectAtIndex:0];
+        UILabel *explanation =
+            [self labelWithText:
+             @"Important: connecting another iPhone by USB does not make it an ExternalAccessory device. This scan cannot detect arbitrary iPhones, Recovery Mode, or DFU Mode."
+                            size:12
+                           color:UIColor.secondaryLabelColor
+                          weight:UIFontWeightRegular];
+
+        explanation.backgroundColor =
+            [UIColor colorWithRed:0.96 green:0.96 blue:0.97 alpha:1];
+
+        explanation.layer.cornerRadius = 8;
+        explanation.layer.masksToBounds = YES;
+        explanation.layoutMargins = UIEdgeInsetsMake(10, 10, 10, 10);
+
+        [self.accessoryList addArrangedSubview:explanation];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [explanation.heightAnchor constraintGreaterThanOrEqualToConstant:66]
+        ]];
+
+        return;
     }
 
-    if (self.isViewLoaded && self.logView) {
-        self.logView.text =
-            [self.logEntries componentsJoinedByString:@"\n"];
+    self.connectionLabel.text =
+        [NSString stringWithFormat:@"%lu accessory%@",
+         (unsigned long)self.detectedAccessories.count,
+         self.detectedAccessories.count == 1 ? @"" : @"ies"];
+
+    self.statusIndicator.backgroundColor = UIColor.systemGreenColor;
+    self.deviceNameLabel.text = @"Supported accessory detected";
+    self.deviceDetailsLabel.text =
+        @"iOS reported the following connected accessory.";
+
+    self.statusLabel.text = @"Accessory detected";
+    self.deviceIcon.image = [UIImage systemImageNamed:@"cable.connector"];
+    self.deviceIcon.tintColor = UIColor.systemGreenColor;
+
+    for (EAAccessory *accessory in self.detectedAccessories) {
+        UIView *row = [self makeCard];
+
+        UILabel *name =
+            [self labelWithText:accessory.name ?: @"Unnamed accessory"
+                           size:13
+                          color:UIColor.labelColor
+                         weight:UIFontWeightSemibold];
+
+        UILabel *details =
+            [self labelWithText:
+             [NSString stringWithFormat:@"%@ · %@",
+              accessory.manufacturer ?: @"Unknown manufacturer",
+              accessory.modelNumber ?: @"Unknown model"]
+                           size:11
+                          color:UIColor.secondaryLabelColor
+                         weight:UIFontWeightRegular];
+
+        [row addSubview:name];
+        [row addSubview:details];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [row.heightAnchor constraintGreaterThanOrEqualToConstant:66],
+
+            [name.topAnchor constraintEqualToAnchor:row.topAnchor constant:12],
+            [name.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:12],
+            [name.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-12],
+
+            [details.topAnchor constraintEqualToAnchor:name.bottomAnchor constant:5],
+            [details.leadingAnchor constraintEqualToAnchor:name.leadingAnchor],
+            [details.trailingAnchor constraintEqualToAnchor:name.trailingAnchor],
+            [details.bottomAnchor constraintLessThanOrEqualToAnchor:row.bottomAnchor constant:-10]
+        ]];
+
+        [self.accessoryList addArrangedSubview:row];
     }
 }
 
