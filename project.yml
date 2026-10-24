@@ -1,0 +1,35 @@
+name: BlackRestore
+
+options:
+  bundleIdPrefix: com.blackrestore
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    PRODUCT_NAME: BlackRestore
+    PRODUCT_BUNDLE_IDENTIFIER: com.blackrestore.app
+    INFOPLIST_FILE: BlackRestore/Info.plist
+    GENERATE_INFOPLIST_FILE: NO
+    TARGETED_DEVICE_FAMILY: "1,2"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGNING_ALLOWED: NO
+
+targets:
+  BlackRestore:
+    type: application
+    platform: iOS
+    sources:
+      - path: BlackRestore
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.blackrestore.app
+        PRODUCT_NAME: BlackRestore
+        INFOPLIST_FILE: BlackRestore/Info.plist
+        CODE_SIGNING_ALLOWED: NO
+    dependencies:
+      - sdk: ExternalAccessory.framework
