@@ -34,7 +34,7 @@
     <string>BlackRestore uses supported external accessory connections for device communication research.</string>
 
     <key>UIUserInterfaceStyle</key>
-    <string>Dark</string>
+    <string>Light</string>
 
     <key>UILaunchScreen</key>
     <dict/>
